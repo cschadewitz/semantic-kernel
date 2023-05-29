@@ -5,10 +5,10 @@ import numpy
 from semantic_kernel.memory.memory_record import MemoryRecord
 from semantic_kernel.memory.memory_store_base import MemoryStoreBase
 
-if TYPE_CHECKING:
-    import pinecone
-    from pinecone import IndexDescription
-    from pinecone.core.client.model.fetch_response import FetchResponse
+import pinecone
+from pinecone import IndexDescription
+from pinecone.core.client.model.fetch_response import FetchResponse
+from pinecone import Vector
 
 MAX_DIMENSIONALITY = 20000
 MAX_UPSERT_BATCH_SIZE = 100
@@ -20,14 +20,6 @@ MAX_DELETE_BATCH_SIZE = 1000
 
 class PineconeMemoryStore(MemoryStoreBase):
     def __init__(self, api_key: str, environment: str, dimension: int) -> None:
-        try:
-            import pinecone
-
-        except ImportError:
-            raise ValueError(
-                "Could not import pincone python package. "
-                "Please install it with `pip install pinecone-client`."
-            )
         if dimension > MAX_DIMENSIONALITY:
             raise ValueError(
                 f"Dimensionality of {dimension} exceeds "
@@ -45,44 +37,28 @@ class PineconeMemoryStore(MemoryStoreBase):
         """
         payload: dict = {}
         if record._text:
-            payload = json.loads(record._text)
+            payload["text"] = record._text
         if record._description:
             payload["description"] = record._description
         return payload
 
     @classmethod
-    def parse_payload(cls, record: dict, with_embeddings: bool) -> MemoryRecord:
+    def parse_payload(cls, record: Vector, with_embeddings: bool) -> MemoryRecord:
         """
         Parses a record from Pinecone into a MemoryRecord.
         """
-        payload = json.loads(record["metadata"])
+        payload = record.metadata
         description = payload.get("description", None)
-        del payload["description"]
+        text = payload.get("text", None)
         return MemoryRecord.local_record(
-            id=record["id"],
+            id=record.id,
             description=description,
-            text=json.dumps(payload),
-            embedding=record["values"] if with_embeddings else numpy.array([]),
+            text=text,
+            embedding=record.values if with_embeddings else numpy.array([]),
         )
 
     def get_collections(self) -> List[str]:
         return pinecone.list_indexes()
-
-    # @classmethod
-    # def batching(
-    #   cls,
-    #   operation: function,
-    #   list: list,
-    #   batch_size: int
-    # ) -> List[Any]:
-    #     """
-    #     Batches a list of operations into a
-    #     list of batches of the specified size.
-    #     """
-    #     return [
-    #         operation.__call__(list[i : i + batch_size])
-    #         for i in range(0, len(list), batch_size)
-    #     ]
 
     async def create_collection_async(self, collection_name: str) -> None:
         """Creates a new index if it does not exist.
@@ -98,7 +74,7 @@ class PineconeMemoryStore(MemoryStoreBase):
 
     async def describe_collection_async(
         self, collection_name: str
-    ) -> Optional[IndexDescription]:
+    ) -> Optional["IndexDescription"]:
         """Gets the description of the index.
 
         Arguments:
@@ -157,7 +133,7 @@ class PineconeMemoryStore(MemoryStoreBase):
 
         index = pinecone.Index(collection_name)
         payload = PineconeMemoryStore.build_payload(record)
-        index.upsert([(record._id, record.embedding, json.dumps(payload))])
+        index.upsert([(record._id, record.embedding.tolist(), payload)])
         return record._id
 
     async def upsert_batch_async(
@@ -177,7 +153,11 @@ class PineconeMemoryStore(MemoryStoreBase):
 
         index = pinecone.Index(collection_name)
         vectors = [
-            (record._id, record.embedding, PineconeMemoryStore.build_payload(record))
+            (
+                record._id,
+                record.embedding.tolist(),
+                PineconeMemoryStore.build_payload(record),
+            )
             for record in records
         ]
         index.upsert(vectors, batch_size=MAX_UPSERT_BATCH_SIZE)
@@ -203,29 +183,27 @@ class PineconeMemoryStore(MemoryStoreBase):
         index = pinecone.Index(collection_name)
         result = index.fetch([key])
 
-        if len(result["vectors"]) == 0:
-            raise Exception(f"Record with key '{key}' does not exist")
+        if len(result.vectors) == 0:
+            raise KeyError(f"Record with key '{key}' does not exist")
 
-        return PineconeMemoryStore.parse_payload(result["vectors"][0], with_embedding)
+        return PineconeMemoryStore.parse_payload(result.vectors[key], with_embedding)
 
     async def _get_batch_async(
-        self, collection_name: str, keys: List[str], with_embeddings: bool
-    ) -> FetchResponse:
-        if not self.does_collection_exist_async(collection_name):
-            raise Exception(f"Collection '{collection_name}' does not exist")
+        self, collection_name: str, keys: List[str], with_embedding: bool
+    ) -> "FetchResponse":
         index = pinecone.Index(collection_name)
         if len(keys) > MAX_FETCH_BATCH_SIZE:
             results = index.fetch(keys[0:MAX_FETCH_BATCH_SIZE])["vectors"]
             for i in range(MAX_FETCH_BATCH_SIZE, len(keys), MAX_FETCH_BATCH_SIZE):
-                results["vectors"].append(
-                    index.fetch(keys[i : i + MAX_FETCH_BATCH_SIZE])["vectors"]
+                results.vectors.update(
+                    index.fetch(keys[i : i + MAX_FETCH_BATCH_SIZE]).vectors
                 )
         else:
             results = index.fetch(keys)
         return results
 
     async def get_batch_async(
-        self, collection_name: str, keys: List[str], with_embeddings: bool
+        self, collection_name: str, keys: List[str], with_embedding: bool
     ) -> List[MemoryRecord]:
         """Gets a batch of records.
 
@@ -237,10 +215,13 @@ class PineconeMemoryStore(MemoryStoreBase):
         Returns:
             List[MemoryRecord] -- The records.
         """
-        result = await self._get_batch_async(collection_name, keys, with_embeddings)
+        if not self.does_collection_exist_async(collection_name):
+            raise Exception(f"Collection '{collection_name}' does not exist")
+
+        result = await self._get_batch_async(collection_name, keys, with_embedding)
         return [
-            PineconeMemoryStore.parse_payload(record, with_embeddings)
-            for record in result
+            PineconeMemoryStore.parse_payload(result.vectors[key], with_embedding)
+            for key in result.vectors.keys()
         ]
 
     async def remove_async(self, collection_name: str, key: str) -> None:

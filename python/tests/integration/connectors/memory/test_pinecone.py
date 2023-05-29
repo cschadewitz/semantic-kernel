@@ -104,3 +104,74 @@ async def test_does_collection_exist_async(get_pinecone_config):
     await memory.create_collection_async("test-collection")
     result = await memory.does_collection_exist_async("test-collection")
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_upsert_async_and_get_async(get_pinecone_config, memory_record1):
+    api_key, environment = get_pinecone_config
+    memory = PineconeMemoryStore(api_key, environment, 2)
+
+    await memory.create_collection_async("test-collection")
+    await memory.upsert_async("test-collection", memory_record1)
+    result = await memory.get_async(
+        "test-collection", memory_record1._id, with_embedding=True
+    )
+    assert result is not None
+    assert result._id == memory_record1._id
+    assert result._description == memory_record1._description
+    assert result._text == memory_record1._text
+    assert result.embedding is not None
+
+
+@pytest.mark.asyncio
+async def test_upsert_batch_async_and_get_batch_async(
+    get_pinecone_config, memory_record1, memory_record2
+):
+    api_key, environment = get_pinecone_config
+    memory = PineconeMemoryStore(api_key, environment, 2)
+
+    await memory.create_collection_async("test-collection")
+    await memory.upsert_batch_async("test-collection", [memory_record1, memory_record2])
+
+    results = await memory.get_batch_async(
+        "test-collection", [memory_record1._id, memory_record2._id], with_embedding=True
+    )
+
+    assert len(results) >= 2
+    assert results[0]._id in [memory_record1._id, memory_record2._id]
+    assert results[1]._id in [memory_record1._id, memory_record2._id]
+
+
+@pytest.mark.asyncio
+async def test_remove_async(get_pinecone_config, memory_record1):
+    api_key, environment = get_pinecone_config
+    memory = PineconeMemoryStore(api_key, environment, 2)
+
+    await memory.create_collection_async("test-collection")
+    await memory.upsert_async("test-collection", memory_record1)
+    await memory.remove_async("test-collection", memory_record1._id)
+    with pytest.raises(KeyError):
+        _ = await memory.get_async(
+            "test-collection", memory_record1._id, with_embedding=True
+        )
+
+
+@pytest.mark.asyncio
+async def test_remove_batch_async(get_pinecone_config, memory_record1, memory_record2):
+    api_key, environment = get_pinecone_config
+    memory = PineconeMemoryStore(api_key, environment, 2)
+
+    await memory.create_collection_async("test-collection")
+    await memory.upsert_batch_async("test-collection", [memory_record1, memory_record2])
+    await memory.remove_batch_async(
+        "test-collection", [memory_record1._id, memory_record2._id]
+    )
+    with pytest.raises(KeyError):
+        _ = await memory.get_async(
+            "test-collection", memory_record1._id, with_embedding=True
+        )
+
+    with pytest.raises(KeyError):
+        _ = await memory.get_async(
+            "test-collection", memory_record2._id, with_embedding=True
+        )
