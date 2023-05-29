@@ -1,6 +1,7 @@
+import os
+
 import numpy as np
 import pytest
-import os
 
 import semantic_kernel as sk
 from semantic_kernel.connectors.memory.pinecone import PineconeMemoryStore

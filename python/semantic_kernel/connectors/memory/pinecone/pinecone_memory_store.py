@@ -1,14 +1,13 @@
-import json
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
-from numpy import ndarray
+from typing import List, Optional, Tuple
+
 import numpy
+import pinecone
+from numpy import ndarray
+from pinecone import IndexDescription, Vector
+from pinecone.core.client.model.fetch_response import FetchResponse
+
 from semantic_kernel.memory.memory_record import MemoryRecord
 from semantic_kernel.memory.memory_store_base import MemoryStoreBase
-
-import pinecone
-from pinecone import IndexDescription
-from pinecone.core.client.model.fetch_response import FetchResponse
-from pinecone import Vector
 
 MAX_DIMENSIONALITY = 20000
 MAX_UPSERT_BATCH_SIZE = 100
