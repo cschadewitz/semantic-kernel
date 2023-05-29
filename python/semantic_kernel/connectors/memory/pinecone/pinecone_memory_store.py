@@ -262,7 +262,7 @@ class PineconeMemoryStore(MemoryStoreBase):
         embedding: ndarray,
         limit: int,
         min_relevance_score: Optional[float],
-        with_embeddings: bool,
+        with_embedding: bool,
     ) -> List[Tuple[MemoryRecord, float]]:
         """Gets the nearest matches to an embedding using cosine similarity.
 
@@ -293,35 +293,33 @@ class PineconeMemoryStore(MemoryStoreBase):
                 include_values=False,
                 include_metadata=False,
             )
-            keys = [match["id"] for match in response["matches"]]
-            records = await self._get_batch_async(
-                collection_name, keys, with_embeddings
-            )
-            vectors: dict[str, dict] = records[0]["vectors"]
-            matches: list[dict[str, Any]] = response["matches"]
+            keys = [match.id for match in response.matches]
+            records = await self._get_batch_async(collection_name, keys, with_embedding)
+            vectors = records.vectors
+            matches = response.matches
             for match in matches:
                 vectors[match["id"]].update(match)
-            results = [value for _, value in vectors.items()]
+            results = [vectors[key] for key in vectors.keys()]
         else:
             response = index.query(
                 vector=embedding.tolist(),
                 top_k=limit,
-                include_vector=with_embeddings,
+                include_vector=with_embedding,
                 include_values=True,
                 include_metadata=True,
             )
-            results: list[dict[str, Any]] = response["matches"]
-
-        filtered = [match for match in results if match["score"] >= min_relevance_score]
+            results = response.matches
+        if min_relevance_score is not None:
+            results = [match for match in results if match.score >= min_relevance_score]
         return (
             [
                 (
-                    PineconeMemoryStore.parse_payload(match, with_embeddings),
+                    PineconeMemoryStore.parse_payload(match, with_embedding),
                     match["score"],
                 )
-                for match in filtered
+                for match in results
             ]
-            if len(filtered) > 0
+            if len(results) > 0
             else []
         )
 
@@ -348,6 +346,6 @@ class PineconeMemoryStore(MemoryStoreBase):
             embedding=embedding,
             limit=1,
             min_relevance_score=min_relevance_score,
-            with_embeddings=with_embedding,
+            with_embedding=with_embedding,
         )
         return matches[0]

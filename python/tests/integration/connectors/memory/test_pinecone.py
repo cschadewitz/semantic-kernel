@@ -56,6 +56,19 @@ def memory_record2():
     )
 
 
+@pytest.fixture
+def memory_record3():
+    return MemoryRecord(
+        id="test_id3",
+        text="sample text3",
+        is_reference=False,
+        embedding=np.array([0.25, 0.80]),
+        description="description",
+        external_source_name="external source",
+        timestamp="timestamp",
+    )
+
+
 def test_constructor(get_pinecone_config):
     api_key, environment = get_pinecone_config
     memory = PineconeMemoryStore(api_key, environment, 2)
@@ -78,7 +91,7 @@ async def test_get_collections_async(get_pinecone_config):
     api_key, environment = get_pinecone_config
     memory = PineconeMemoryStore(api_key, environment, 2)
 
-    await memory.create_collection_async("test-collection-a")
+    await memory.create_collection_async("test-collection")
     # await memory.create_collection_async("test-collection-b")
     # await memory.create_collection_async("test-collection-c")
     result = await memory.get_collections_async()
@@ -175,3 +188,48 @@ async def test_remove_batch_async(get_pinecone_config, memory_record1, memory_re
         _ = await memory.get_async(
             "test-collection", memory_record2._id, with_embedding=True
         )
+
+
+@pytest.mark.asyncio
+async def test_get_nearest_match_async(
+    get_pinecone_config, memory_record1, memory_record2
+):
+    api_key, environment = get_pinecone_config
+    memory = PineconeMemoryStore(api_key, environment, 2)
+
+    await memory.create_collection_async("test-collection")
+    await memory.upsert_batch_async("test-collection", [memory_record1, memory_record2])
+    test_embedding = memory_record1.embedding
+    test_embedding[0] = test_embedding[0] + 0.01
+
+    result = await memory.get_nearest_match_async(
+        "test-collection", test_embedding, min_relevance_score=0.0, with_embedding=True
+    )
+    assert result is not None
+    assert result[0]._id == memory_record1._id
+
+
+@pytest.mark.asyncio
+async def test_get_nearest_matches_async(
+    get_pinecone_config, memory_record1, memory_record2, memory_record3
+):
+    api_key, environment = get_pinecone_config
+    memory = PineconeMemoryStore(api_key, environment, 2)
+
+    await memory.create_collection_async("test-collection")
+    await memory.upsert_batch_async(
+        "test-collection", [memory_record1, memory_record2, memory_record3]
+    )
+    test_embedding = memory_record2.embedding
+    test_embedding[0] = test_embedding[0] + 0.025
+
+    result = await memory.get_nearest_matches_async(
+        "test-collection",
+        test_embedding,
+        limit=2,
+        min_relevance_score=0.0,
+        with_embedding=True,
+    )
+    assert len(result) == 2
+    assert result[0][0]._id in [memory_record3._id, memory_record2._id]
+    assert result[1][0]._id in [memory_record3._id, memory_record2._id]
